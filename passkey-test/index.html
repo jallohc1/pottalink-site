@@ -35,20 +35,23 @@
 
     <div class="step">
       <h2>2. Register a passkey</h2>
-      <p>Needs step 1. Your browser asks for Touch ID, Face ID or your device passcode.</p>
+      <p>Needs step 1. The button is ready once the options have arrived; your browser then asks for Touch ID, Face ID or your device password. Choose to save the passkey on this device or in iCloud Keychain.</p>
       <button id="register" disabled>Register passkey</button>
+      <span id="register-status"></span>
       <button id="list" disabled>List passkeys</button>
     </div>
 
     <div class="step">
       <h2>3. Sign in with the passkey</h2>
-      <button id="passkey-sign-in">Sign in with passkey</button>
+      <button id="passkey-prepare">Prepare</button>
+      <button id="passkey-use" disabled>Use passkey</button>
     </div>
 
     <div class="step">
       <h2>4. Step up with the passkey</h2>
       <p>Sign in with a code first (step 1), then ask Cognito for level 3, which only a passkey can give.</p>
-      <button id="step-up" disabled>Step up to level 3</button>
+      <button id="step-up-prepare" disabled>Prepare</button>
+      <button id="step-up-use" disabled>Use passkey</button>
     </div>
 
     <h2>Results</h2>

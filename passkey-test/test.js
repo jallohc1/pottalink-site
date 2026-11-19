@@ -9,6 +9,11 @@
 
   let session = null; // the SMS_OTP challenge session
   let tokens = null; // { AccessToken, IdToken, RefreshToken } in memory only
+  // Passkey prompts must open straight after a click (Safari), so every network call that
+  // fetches passkey options happens before the click that opens the prompt.
+  let registrationOptions = null;
+  let passkeyStart = null;
+  let stepUpStart = null;
 
   const $ = (id) => document.getElementById(id);
   const phone = () => $('phone').value.trim();
@@ -44,9 +49,17 @@
     tokens = result;
     const access = claims(result.AccessToken);
     log(`${how}: signed in. Access token claims: ${JSON.stringify(access)}`);
-    $('register').disabled = false;
     $('list').disabled = false;
-    $('step-up').disabled = false;
+    $('step-up-prepare').disabled = false;
+    prepareRegistration().catch((error) => log(`FAILED ${error.message}`));
+  }
+
+  async function prepareRegistration() {
+    $('register').disabled = true;
+    const start = await cognito('StartWebAuthnRegistration', { AccessToken: tokens.AccessToken });
+    registrationOptions = start.CredentialCreationOptions;
+    log(`Registration options ready (rp.id ${registrationOptions.rp?.id || 'not set'}).`);
+    $('register').disabled = false;
   }
 
   // ---------- base64url <-> ArrayBuffer ----------
@@ -106,12 +119,16 @@
     };
   }
 
-  async function answerWithPasskey(start, label) {
+  function checkPasskeyChallenge(start, label) {
     if (start.ChallengeName !== 'WEB_AUTHN') {
       throw new Error(`${label}: expected a WEB_AUTHN challenge, got ${start.ChallengeName || 'none'}`);
     }
     const options = JSON.parse(start.ChallengeParameters.CREDENTIAL_REQUEST_OPTIONS);
-    log(`${label}: asking the browser for the passkey (rpId ${options.rpId || 'not set'})`);
+    log(`${label}: ready (rpId ${options.rpId || 'not set'}). Click Use passkey.`);
+  }
+
+  async function answerWithPasskey(start, label) {
+    const options = JSON.parse(start.ChallengeParameters.CREDENTIAL_REQUEST_OPTIONS);
     const assertion = await navigator.credentials.get({ publicKey: requestOptions(options) });
     const done = await cognito('RespondToAuthChallenge', {
       ClientId: CLIENT_ID,
@@ -128,7 +145,7 @@
       try {
         await fn();
       } catch (error) {
-        log(`FAILED ${error.name === 'NotAllowedError' ? '(cancelled or not allowed) ' : ''}${error.message}`);
+        log(`FAILED ${error.name && error.name !== 'Error' ? `[${error.name}] ` : ''}${error.message}`);
       }
     };
   }
@@ -154,21 +171,27 @@
       Session: session,
       ChallengeResponses: { USERNAME: phone(), SMS_OTP_CODE: code },
     });
+    $('verify-code').disabled = true;
     signedIn(done.AuthenticationResult, 'SMS code');
   }));
 
   $('register').addEventListener('click', guard(async () => {
-    const start = await cognito('StartWebAuthnRegistration', { AccessToken: tokens.AccessToken });
-    log(`Registration options received (rp.id ${start.CredentialCreationOptions.rp?.id || 'not set'})`);
-    const credential = await navigator.credentials.create({
-      publicKey: creationOptions(start.CredentialCreationOptions),
-    });
+    const options = registrationOptions;
+    registrationOptions = null;
+    $('register').disabled = true;
+    const credential = await navigator.credentials.create({ publicKey: creationOptions(options) });
     await cognito('CompleteWebAuthnRegistration', {
       AccessToken: tokens.AccessToken,
       Credential: credentialJson(credential),
     });
     log(`Passkey registered (authenticator: ${credential.authenticatorAttachment || 'unknown'}).`);
   }));
+  // A failed or cancelled prompt uses up the options; fetch fresh ones for another try.
+  $('register').addEventListener('click', () => {
+    setTimeout(() => {
+      if (tokens && !registrationOptions) prepareRegistration().catch(() => undefined);
+    }, 1500);
+  });
 
   $('list').addEventListener('click', guard(async () => {
     const listed = await cognito('ListWebAuthnCredentials', { AccessToken: tokens.AccessToken });
@@ -178,17 +201,25 @@
     log(`Passkeys: ${items.length ? items.join('; ') : 'none'}`);
   }));
 
-  $('passkey-sign-in').addEventListener('click', guard(async () => {
-    const start = await cognito('InitiateAuth', {
+  $('passkey-prepare').addEventListener('click', guard(async () => {
+    passkeyStart = await cognito('InitiateAuth', {
       ClientId: CLIENT_ID,
       AuthFlow: 'USER_AUTH',
       AuthParameters: { USERNAME: phone(), PREFERRED_CHALLENGE: 'WEB_AUTHN' },
     });
+    checkPasskeyChallenge(passkeyStart, 'Passkey sign-in');
+    $('passkey-use').disabled = false;
+  }));
+
+  $('passkey-use').addEventListener('click', guard(async () => {
+    const start = passkeyStart;
+    passkeyStart = null;
+    $('passkey-use').disabled = true;
     await answerWithPasskey(start, 'Passkey sign-in');
   }));
 
-  $('step-up').addEventListener('click', guard(async () => {
-    const start = await cognito('InitiateAuth', {
+  $('step-up-prepare').addEventListener('click', guard(async () => {
+    stepUpStart = await cognito('InitiateAuth', {
       ClientId: CLIENT_ID,
       AuthFlow: 'USER_AUTH',
       AuthParameters: {
@@ -198,6 +229,14 @@
         PREFERRED_CHALLENGE: 'WEB_AUTHN',
       },
     });
+    checkPasskeyChallenge(stepUpStart, 'Step-up to level 3');
+    $('step-up-use').disabled = false;
+  }));
+
+  $('step-up-use').addEventListener('click', guard(async () => {
+    const start = stepUpStart;
+    stepUpStart = null;
+    $('step-up-use').disabled = true;
     await answerWithPasskey(start, 'Step-up to level 3');
   }));
 })();
