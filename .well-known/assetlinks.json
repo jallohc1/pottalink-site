@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.get_login_creds"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.pottalink.hha",
+      "sha256_cert_fingerprints": [
+        "94:12:43:BC:4E:BA:5D:F7:E1:47:A4:01:B9:93:51:9C:CA:93:62:47:88:A6:D0:38:3C:EB:AD:F0:DE:DF:64:39"
+      ]
+    }
+  }
+]
